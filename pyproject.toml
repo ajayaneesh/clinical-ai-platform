@@ -22,3 +22,8 @@ dev = [
 # and point pytest at the tests/ directory.
 pythonpath = ["backend"]
 testpaths = ["tests"]
+
+[[tool.uv.index]]
+# Resolve dependencies from public PyPI so clones and CI work anywhere.
+url = "https://pypi.org/simple"
+default = true
