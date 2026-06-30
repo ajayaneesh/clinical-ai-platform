@@ -11,7 +11,14 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "mypy>=2.1.0",
     "pytest>=9.1.1",
     "ruff>=0.15.20",
 ]
+
+[tool.pytest.ini_options]
+# Put backend/ on the import path so `from app.main import app` resolves,
+# and point pytest at the tests/ directory.
+pythonpath = ["backend"]
+testpaths = ["tests"]

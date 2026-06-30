@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          # Pin the Python version to match .python-version / the Dockerfile.
+          python-version: "3.11"
+
+      - name: Install dependencies
+        # --frozen: install exactly what uv.lock pins; fail if the lock is stale.
+        run: uv sync --frozen
+
+      - name: Run tests
+        run: uv run pytest

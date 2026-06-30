@@ -12,4 +12,4 @@ async def root() -> RootResponse:
 
 @router.get("/health")
 async def health() -> HealthResponse:
-    return HealthResponse(status="healthy:)")
+    return HealthResponse(status="healthy")
