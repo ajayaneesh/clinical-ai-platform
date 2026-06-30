@@ -1,0 +1,17 @@
+services:
+  inference:
+    build:
+      # Build context is the repo root so the Dockerfile can COPY pyproject.toml,
+      # uv.lock, and backend/. The Dockerfile itself lives in infrastructure/docker.
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile
+    ports:
+      # host:container — reach the service at http://localhost:8000
+      - "8000:8000"
+    volumes:
+      # Bind mount: your host source is mounted into the container, so edits on
+      # your Mac are visible instantly. Combined with --reload below, the server
+      # restarts on save — no rebuild per code change.
+      - ../../backend:/app/backend
+    # Override the image's CMD to add --reload for local development.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
