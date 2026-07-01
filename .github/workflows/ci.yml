@@ -23,5 +23,15 @@ jobs:
         # --frozen: install exactly what uv.lock pins; fail if the lock is stale.
         run: uv sync --frozen
 
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Check formatting (ruff)
+        # --check: fail if any file isn't formatted, without modifying it.
+        run: uv run ruff format --check .
+
+      - name: Type check (mypy)
+        run: uv run mypy backend
+
       - name: Run tests
         run: uv run pytest

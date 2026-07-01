@@ -2,9 +2,9 @@ import logging
 import time
 import uuid
 
+from fastapi import FastAPI
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.types import ASGIApp
 
 logger = logging.getLogger("app.access")
 
@@ -59,5 +59,5 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def add_logging_middleware(app: ASGIApp) -> None:
+def add_logging_middleware(app: FastAPI) -> None:
     app.add_middleware(LoggingMiddleware)
