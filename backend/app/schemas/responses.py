@@ -7,3 +7,12 @@ class RootResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+
+
+class InferenceRequest(BaseModel):
+    text: str
+
+
+class InferenceResponse(BaseModel):
+    prediction: str
+    confidence: float

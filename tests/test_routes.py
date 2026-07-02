@@ -17,6 +17,12 @@ def test_health_returns_status():
     assert response.json() == {"status": "healthy"}
 
 
+def test_infer_returns_dummy_prediction():
+    response = client.post("/infer", json={"text": "Patient labs are stable."})
+    assert response.status_code == 200
+    assert response.json() == {"prediction": "normal", "confidence": 0.95}
+
+
 def test_request_id_header_present():
     response = client.get("/health")
     assert "X-Request-ID" in response.headers
