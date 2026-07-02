@@ -1,5 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.api.dependencies import get_inference_service
 from app.schemas.responses import (
     HealthResponse,
     InferenceRequest,
@@ -9,7 +10,6 @@ from app.schemas.responses import (
 from app.services.inference import InferenceService
 
 router = APIRouter()
-inference_service = InferenceService()
 
 
 @router.get("/")
@@ -23,6 +23,9 @@ async def health() -> HealthResponse:
 
 
 @router.post("/infer")
-async def infer(request: InferenceRequest) -> InferenceResponse:
-    result = inference_service.predict(request.text)
+async def infer(
+    request: InferenceRequest,
+    service: InferenceService = Depends(get_inference_service),
+) -> InferenceResponse:
+    result = service.predict(request.text)
     return InferenceResponse(**result)
