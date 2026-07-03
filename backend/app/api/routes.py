@@ -1,13 +1,17 @@
-from fastapi import APIRouter, Depends
+import binascii
+from base64 import b64decode
 
-from app.api.dependencies import get_inference_service
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from app.api.dependencies import get_queue
+from app.core.queue import Job, Queue, QueueTimeout
+from app.schemas.requests import InferenceRequest
 from app.schemas.responses import (
+    ErrorResponse,
     HealthResponse,
-    InferenceRequest,
     InferenceResponse,
     RootResponse,
 )
-from app.services.inference import InferenceService
 
 router = APIRouter()
 
@@ -22,10 +26,32 @@ async def health() -> HealthResponse:
     return HealthResponse(status="healthy")
 
 
-@router.post("/infer")
-async def infer(
+@router.post(
+    "/predict",
+    status_code=status.HTTP_200_OK,
+    summary="Classify an image",
+    responses={
+        400: {"model": ErrorResponse, "description": "Image is not valid base64."},
+        504: {"model": ErrorResponse, "description": "Prediction timed out."},
+    },
+)
+async def predict(
     request: InferenceRequest,
-    service: InferenceService = Depends(get_inference_service),
+    queue: Queue = Depends(get_queue),
 ) -> InferenceResponse:
-    result = service.predict(request.text)
+    try:
+        b64decode(request.image, validate=True)
+    except binascii.Error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Image could not be decoded as base64.",
+        )
+
+    try:
+        result = await queue.submit(Job(image=request.image))
+    except QueueTimeout:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Prediction timed out.",
+        )
     return InferenceResponse(**result)

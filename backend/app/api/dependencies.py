@@ -1,3 +1,6 @@
+from fastapi import Request
+
+from app.core.queue import Queue
 from app.models.inference import DummyInferenceModel, InferenceModel
 from app.services.inference import InferenceService
 
@@ -14,3 +17,8 @@ def get_model() -> InferenceModel:
 
 def get_inference_service() -> InferenceService:
     return InferenceService(get_model())
+
+
+def get_queue(request: Request) -> Queue:
+    queue: Queue = request.app.state.queue
+    return queue

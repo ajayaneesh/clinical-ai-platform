@@ -5,5 +5,5 @@ class InferenceService:
     def __init__(self, model: InferenceModel) -> None:
         self._model = model
 
-    def predict(self, text: str) -> InferenceResult:
-        return self._model.predict(text)
+    def predict(self, image: str) -> InferenceResult:
+        return self._model.predict(image)
