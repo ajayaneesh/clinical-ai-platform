@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.138.1",
+    "pydantic-settings>=2.14.2",
     "uvicorn>=0.49.0",
 ]
 
@@ -21,6 +22,12 @@ build-backend = "hatchling.build"
 # Our package lives under backend/, not at the repo root.
 packages = ["backend/app"]
 
+[[tool.uv.index]]
+# Public PyPI so clones and CI resolve anywhere. Do not point this at an
+# internal mirror — CI runners cannot reach internal hosts.
+url = "https://pypi.org/simple"
+default = true
+
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
@@ -34,8 +41,3 @@ dev = [
 # and point pytest at the tests/ directory.
 pythonpath = ["backend"]
 testpaths = ["tests"]
-
-[[tool.uv.index]]
-# Resolve dependencies from public PyPI so clones and CI work anywhere.
-url = "https://pypi.org/simple"
-default = true

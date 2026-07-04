@@ -165,3 +165,14 @@ def test_predict_returns_504_on_timeout():
     response = asyncio.run(scenario())
     assert response.status_code == 504
     assert response.json() == {"detail": "Prediction timed out."}
+
+
+def test_queue_timeout_is_config_driven(monkeypatch):
+    # The timeout comes from the CLINICAL_AI_QUEUE_TIMEOUT_SECONDS env var.
+    from app.core.config import Settings
+
+    monkeypatch.setenv("CLINICAL_AI_QUEUE_TIMEOUT_SECONDS", "5")
+    assert Settings().queue_timeout_seconds == 5.0
+
+    monkeypatch.delenv("CLINICAL_AI_QUEUE_TIMEOUT_SECONDS")
+    assert Settings().queue_timeout_seconds == 30.0  # default when unset

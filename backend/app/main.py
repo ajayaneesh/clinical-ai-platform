@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from app.api.dependencies import get_inference_service
 from app.api.routes import router
+from app.core.config import settings
 from app.core.logging import configure_logging
 from app.core.middleware import add_logging_middleware
 from app.core.queue import LocalQueue
@@ -15,7 +16,7 @@ configure_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    queue = LocalQueue()
+    queue = LocalQueue(timeout=settings.queue_timeout_seconds)
     app.state.queue = queue
     worker_task = start_worker(queue, get_inference_service())
     try:
