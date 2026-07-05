@@ -29,6 +29,12 @@ packages = ["backend/app"]
 url = "https://pypi.org/simple"
 default = true
 
+#[[tool.uv.index]]
+## Public PyPI so clones and CI resolve anywhere. Do not point this at an
+## internal mirror — CI runners cannot reach internal hosts.
+#url = "https://pypi.org/simple"
+#default = true
+
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
