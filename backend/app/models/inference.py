@@ -1,6 +1,10 @@
 from typing import Protocol, TypedDict
 
 
+class InvalidImageError(Exception):
+    """Raised when the input cannot be decoded/opened as an image."""
+
+
 class InferenceResult(TypedDict):
     prediction: str
     confidence: float

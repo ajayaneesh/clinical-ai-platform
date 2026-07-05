@@ -6,13 +6,22 @@ behavior and malformed requests.
 """
 
 from base64 import b64encode
+from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.main import app
 
-VALID_IMAGE = b64encode(b"fake image bytes").decode()
+
+def _png_b64() -> str:
+    buf = BytesIO()
+    Image.new("RGB", (8, 8), (120, 30, 200)).save(buf, "PNG")
+    return b64encode(buf.getvalue()).decode()
+
+
+VALID_IMAGE = _png_b64()
 
 
 @pytest.fixture
@@ -83,6 +92,26 @@ def test_predict_rejects_wrong_method(running_app):
 def test_unknown_route_returns_404(running_app):
     response = running_app.get("/does-not-exist")
     assert response.status_code == 404
+
+
+def test_valid_base64_but_not_an_image_returns_400(running_app):
+    # Valid base64 that decodes to a truncated/invalid image (the reported bug):
+    # must return 400, NOT hang until a 504 timeout.
+    response = running_app.post(
+        "/predict", json={"image": "iVBORw0KGgoAAAANSUhEUgAAAAUA"}
+    )
+    assert response.status_code == 400
+
+
+def test_bad_image_does_not_kill_worker(running_app):
+    # A malformed image must fail only THAT request; the worker keeps running and
+    # the next valid request still succeeds.
+    bad = running_app.post("/predict", json={"image": "iVBORw0KGgoAAAANSUhEUgAAAAUA"})
+    assert bad.status_code == 400
+
+    good = running_app.post("/predict", json={"image": VALID_IMAGE})
+    assert good.status_code == 200
+    assert good.json() == {"prediction": "normal", "confidence": 0.95}
 
 
 def test_multiple_workers_increase_throughput():

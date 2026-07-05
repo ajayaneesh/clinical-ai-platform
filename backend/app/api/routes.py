@@ -6,6 +6,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api.dependencies import get_queue
 from app.core.queue import Job, Queue, QueueTimeout
+from app.models.inference import InvalidImageError
 from app.schemas.requests import InferenceRequest
 from app.schemas.responses import (
     ErrorResponse,
@@ -54,7 +55,10 @@ async def metrics() -> Response:
     status_code=status.HTTP_200_OK,
     summary="Classify an image",
     responses={
-        400: {"model": ErrorResponse, "description": "Image is not valid base64."},
+        400: {
+            "model": ErrorResponse,
+            "description": "Invalid base64 or undecodable image.",
+        },
         504: {"model": ErrorResponse, "description": "Prediction timed out."},
     },
 )
@@ -72,6 +76,11 @@ async def predict(
 
     try:
         result = await queue.submit(Job(image=request.image))
+    except InvalidImageError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Input is valid base64 but not a decodable image.",
+        )
     except QueueTimeout:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,

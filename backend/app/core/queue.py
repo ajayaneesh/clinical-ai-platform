@@ -31,6 +31,8 @@ class Queue(Protocol):
 
     def complete(self, job_id: str, result: InferenceResult) -> None: ...
 
+    def fail(self, job_id: str, exc: Exception) -> None: ...
+
 
 class LocalQueue:
     def __init__(self, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> None:
@@ -58,3 +60,8 @@ class LocalQueue:
         future = self._results.get(job_id)
         if future is not None and not future.done():
             future.set_result(result)
+
+    def fail(self, job_id: str, exc: Exception) -> None:
+        future = self._results.get(job_id)
+        if future is not None and not future.done():
+            future.set_exception(exc)

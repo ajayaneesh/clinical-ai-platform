@@ -15,7 +15,11 @@ class InferenceWorker:
         self._service = service
 
     async def run(self) -> None:
-        """Consume jobs forever: pull, predict, publish the result back."""
+        """Consume jobs forever: pull, predict, publish the result back.
+
+        A failing job must NOT kill the worker — we fail that one job and keep
+        consuming, so one bad request can't take the service down.
+        """
         loop = asyncio.get_running_loop()
         while True:
             job = await self._queue.get()
@@ -24,7 +28,17 @@ class InferenceWorker:
             # This is the in-process stand-in for the eventual separate worker
             # process; when that lands, this offload moves out of the API entirely.
             start = time.perf_counter()
-            result = await loop.run_in_executor(None, self._service.predict, job.image)
+            try:
+                result = await loop.run_in_executor(
+                    None, self._service.predict, job.image
+                )
+            except Exception as exc:
+                logger.warning(
+                    "inference_failed",
+                    extra={"job_id": job.job_id, "error": type(exc).__name__},
+                )
+                self._queue.fail(job.job_id, exc)
+                continue
             elapsed = time.perf_counter() - start
 
             INFERENCE_LATENCY.observe(elapsed)

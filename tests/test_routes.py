@@ -1,12 +1,21 @@
 from base64 import b64encode
+from io import BytesIO
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.main import app
 
 client = TestClient(app)
 
-VALID_IMAGE = b64encode(b"fake image bytes").decode()
+
+def _png_b64() -> str:
+    buf = BytesIO()
+    Image.new("RGB", (8, 8), (120, 30, 200)).save(buf, "PNG")
+    return b64encode(buf.getvalue()).decode()
+
+
+VALID_IMAGE = _png_b64()
 
 
 def test_root_returns_message():
