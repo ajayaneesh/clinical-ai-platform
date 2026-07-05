@@ -1,0 +1,24 @@
+# Runs ruff + mypy on every commit, using the SAME versions as pyproject.toml
+# (via `uv run`) so hooks, local runs, and CI never drift apart.
+# Install once with: uv run pre-commit install
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+
+      - id: mypy
+        name: mypy
+        entry: uv run mypy backend
+        language: system
+        types: [python]
+        pass_filenames: false
