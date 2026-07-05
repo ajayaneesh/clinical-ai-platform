@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CLINICAL_AI_", env_file=".env")
 
     queue_timeout_seconds: float = 30.0
+    worker_count: int = 4
 
 
 settings = Settings()

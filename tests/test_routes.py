@@ -95,7 +95,7 @@ def test_worker_offloads_prediction_and_does_not_block_loop():
     from app.core.queue import Job, LocalQueue
     from app.models.inference import InferenceResult
     from app.services.inference import InferenceService
-    from app.workers.inference_worker import start_worker
+    from app.workers.inference_worker import start_workers
 
     SLOW = 1.0
 
@@ -107,7 +107,7 @@ def test_worker_offloads_prediction_and_does_not_block_loop():
     async def scenario() -> tuple[float, float]:
         loop = asyncio.get_running_loop()
         queue = LocalQueue()
-        worker_task = start_worker(queue, InferenceService(SlowModel()))
+        worker_tasks = start_workers(queue, InferenceService(SlowModel()), count=1)
         try:
             start = loop.time()
             predict_task = asyncio.create_task(queue.submit(Job(image="x")))
@@ -121,7 +121,8 @@ def test_worker_offloads_prediction_and_does_not_block_loop():
             predict_time = loop.time() - start
             return tick_time, predict_time
         finally:
-            worker_task.cancel()
+            for task in worker_tasks:
+                task.cancel()
 
     tick_time, predict_time = asyncio.run(scenario())
 

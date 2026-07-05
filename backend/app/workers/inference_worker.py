@@ -38,6 +38,15 @@ class InferenceWorker:
             self._queue.complete(job.job_id, result)
 
 
-def start_worker(queue: Queue, service: InferenceService) -> asyncio.Task[None]:
+def start_workers(
+    queue: Queue, service: InferenceService, count: int = 1
+) -> list[asyncio.Task[None]]:
+    """Start `count` workers on the shared queue.
+
+    A single worker awaits each job to completion before pulling the next, so
+    throughput is capped at 1 / per-job-latency. Multiple workers pull
+    concurrently, scaling throughput ~linearly with count (see
+    docs/architecture/performance-baseline.md).
+    """
     worker = InferenceWorker(queue, service)
-    return asyncio.create_task(worker.run())
+    return [asyncio.create_task(worker.run()) for _ in range(count)]

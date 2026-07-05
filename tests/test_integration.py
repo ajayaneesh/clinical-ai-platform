@@ -83,3 +83,43 @@ def test_predict_rejects_wrong_method(running_app):
 def test_unknown_route_returns_404(running_app):
     response = running_app.get("/does-not-exist")
     assert response.status_code == 404
+
+
+def test_multiple_workers_increase_throughput():
+    # Two workers processing a fixed-latency model must finish a batch of jobs
+    # in roughly half the time a single worker would. Proves the worker-count
+    # fix scales throughput (see docs/architecture/performance-baseline.md).
+    import asyncio
+    import time
+
+    from app.core.queue import Job, LocalQueue
+    from app.models.inference import InferenceResult
+    from app.services.inference import InferenceService
+    from app.workers.inference_worker import start_workers
+
+    DELAY = 0.02
+    JOBS = 8
+
+    class FixedModel:
+        def predict(self, image: str) -> InferenceResult:
+            time.sleep(DELAY)
+            return {"prediction": "normal", "confidence": 0.95}
+
+    async def run_with(count: int) -> float:
+        queue = LocalQueue(timeout=30)
+        tasks = start_workers(queue, InferenceService(FixedModel()), count=count)
+        try:
+            loop = asyncio.get_running_loop()
+            start = loop.time()
+            await asyncio.gather(*(queue.submit(Job(image="x")) for _ in range(JOBS)))
+            return loop.time() - start
+        finally:
+            for task in tasks:
+                task.cancel()
+
+    one = asyncio.run(run_with(1))
+    two = asyncio.run(run_with(2))
+
+    # 1 worker is serial (~JOBS * DELAY); 2 workers roughly halve it. Use a loose
+    # bound to stay robust against scheduling jitter.
+    assert two < one * 0.75, f"2 workers ({two:.3f}s) not faster than 1 ({one:.3f}s)"

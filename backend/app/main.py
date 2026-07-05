@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.logging import configure_logging
 from app.core.middleware import add_logging_middleware
 from app.core.queue import LocalQueue
-from app.workers.inference_worker import start_worker
+from app.workers.inference_worker import start_workers
 
 configure_logging()
 
@@ -18,11 +18,14 @@ configure_logging()
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     queue = LocalQueue(timeout=settings.queue_timeout_seconds)
     app.state.queue = queue
-    worker_task = start_worker(queue, get_inference_service())
+    worker_tasks = start_workers(
+        queue, get_inference_service(), count=settings.worker_count
+    )
     try:
         yield
     finally:
-        worker_task.cancel()
+        for task in worker_tasks:
+            task.cancel()
 
 
 app = FastAPI(
