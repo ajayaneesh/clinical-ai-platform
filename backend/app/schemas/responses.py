@@ -9,6 +9,10 @@ class HealthResponse(BaseModel):
     status: str
 
 
+class ReadyResponse(BaseModel):
+    status: str
+
+
 class InferenceResponse(BaseModel):
     prediction: str = Field(
         description="Predicted class label.",

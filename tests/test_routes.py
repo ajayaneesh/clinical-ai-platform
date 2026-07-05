@@ -176,3 +176,30 @@ def test_queue_timeout_is_config_driven(monkeypatch):
 
     monkeypatch.delenv("CLINICAL_AI_QUEUE_TIMEOUT_SECONDS")
     assert Settings().queue_timeout_seconds == 30.0  # default when unset
+
+
+def test_ready_when_queue_initialized():
+    # Lifespan sets app.state.queue -> /ready returns 200.
+    with TestClient(app) as c:
+        response = c.get("/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
+
+
+def test_ready_returns_503_without_queue():
+    # No lifespan run (plain client) -> no queue -> not ready.
+    app.state.queue = None
+    response = client.get("/ready")
+    assert response.status_code == 503
+
+
+def test_metrics_endpoint_exposes_prometheus_text():
+    # Exercise a request so counters are non-empty, then scrape /metrics.
+    with TestClient(app) as c:
+        c.post("/predict", json={"image": VALID_IMAGE})
+        response = c.get("/metrics")
+    assert response.status_code == 200
+    body = response.text
+    assert "http_request_latency_seconds" in body
+    assert "inference_latency_seconds" in body
+    assert "http_requests_total" in body

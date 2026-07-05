@@ -6,7 +6,15 @@ from fastapi import FastAPI
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
+from app.core.metrics import REQUEST_COUNT, REQUEST_LATENCY
+
 logger = logging.getLogger("app.access")
+
+
+def _record_metrics(method: str, endpoint: str, status_code: int, seconds: float) -> None:
+    labels = (method, endpoint, str(status_code))
+    REQUEST_LATENCY.labels(*labels).observe(seconds)
+    REQUEST_COUNT.labels(*labels).inc()
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
@@ -30,7 +38,9 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             # The endpoint raised. Log it with the same fields (status 500),
             # then re-raise so FastAPI's error handling still produces the
             # response — we observe the failure, we don't swallow it.
-            latency_ms = round((time.perf_counter() - start) * 1000, 2)
+            elapsed = time.perf_counter() - start
+            latency_ms = round(elapsed * 1000, 2)
+            _record_metrics(request.method, request.url.path, 500, elapsed)
             logger.exception(
                 "request_failed",
                 extra={
@@ -43,8 +53,10 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             )
             raise
 
-        latency_ms = round((time.perf_counter() - start) * 1000, 2)
+        elapsed = time.perf_counter() - start
+        latency_ms = round(elapsed * 1000, 2)
         response.headers["X-Request-ID"] = request_id
+        _record_metrics(request.method, request.url.path, response.status_code, elapsed)
 
         logger.info(
             "request",

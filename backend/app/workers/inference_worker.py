@@ -1,7 +1,12 @@
 import asyncio
+import logging
+import time
 
+from app.core.metrics import INFERENCE_LATENCY
 from app.core.queue import Queue
 from app.services.inference import InferenceService
+
+logger = logging.getLogger("app.inference")
 
 
 class InferenceWorker:
@@ -18,7 +23,15 @@ class InferenceWorker:
             # work). Run it in a thread pool so it doesn't block the event loop.
             # This is the in-process stand-in for the eventual separate worker
             # process; when that lands, this offload moves out of the API entirely.
+            start = time.perf_counter()
             result = await loop.run_in_executor(None, self._service.predict, job.image)
+            elapsed = time.perf_counter() - start
+
+            INFERENCE_LATENCY.observe(elapsed)
+            logger.info(
+                "inference",
+                extra={"job_id": job.job_id, "inference_latency_ms": round(elapsed * 1000, 2)},
+            )
             self._queue.complete(job.job_id, result)
 
 
