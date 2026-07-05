@@ -30,7 +30,10 @@ class InferenceWorker:
             INFERENCE_LATENCY.observe(elapsed)
             logger.info(
                 "inference",
-                extra={"job_id": job.job_id, "inference_latency_ms": round(elapsed * 1000, 2)},
+                extra={
+                    "job_id": job.job_id,
+                    "inference_latency_ms": round(elapsed * 1000, 2),
+                },
             )
             self._queue.complete(job.job_id, result)
 

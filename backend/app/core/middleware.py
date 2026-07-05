@@ -11,7 +11,9 @@ from app.core.metrics import REQUEST_COUNT, REQUEST_LATENCY
 logger = logging.getLogger("app.access")
 
 
-def _record_metrics(method: str, endpoint: str, status_code: int, seconds: float) -> None:
+def _record_metrics(
+    method: str, endpoint: str, status_code: int, seconds: float
+) -> None:
     labels = (method, endpoint, str(status_code))
     REQUEST_LATENCY.labels(*labels).observe(seconds)
     REQUEST_COUNT.labels(*labels).inc()

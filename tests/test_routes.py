@@ -59,7 +59,11 @@ def test_predict_uses_injected_model():
     # worker (started in lifespan) uses the fake model. Result flows back
     # through the queue to the awaiting request.
     from app.api import dependencies
-    from app.models.inference import DummyInferenceModel, InferenceModel, InferenceResult
+    from app.models.inference import (
+        DummyInferenceModel,
+        InferenceModel,
+        InferenceResult,
+    )
 
     class FakeModel:
         def predict(self, image: str) -> InferenceResult:
@@ -124,7 +128,9 @@ def test_worker_offloads_prediction_and_does_not_block_loop():
     # Loop stayed free: the 50ms task finished promptly, not after SLOW seconds.
     assert tick_time < SLOW / 2, f"event loop was blocked ({tick_time:.2f}s)"
     # The prediction itself still took the full slow time.
-    assert predict_time >= SLOW, f"prediction should take >= {SLOW}s, got {predict_time:.2f}s"
+    assert predict_time >= SLOW, (
+        f"prediction should take >= {SLOW}s, got {predict_time:.2f}s"
+    )
 
 
 def test_submit_times_out_when_no_worker_completes_it():
