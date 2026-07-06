@@ -7,5 +7,10 @@ class Settings(BaseSettings):
     queue_timeout_seconds: float = 30.0
     worker_count: int = 4
 
+    # Hugging Face model repo id for the classifier, e.g.
+    # "lxyuan/vit-xray-pneumonia-classification". Verify it exists on
+    # huggingface.co before use. Empty string = use the placeholder TorchModel.
+    model_id: str = "microsoft/resnet-50"
+
 
 settings = Settings()
