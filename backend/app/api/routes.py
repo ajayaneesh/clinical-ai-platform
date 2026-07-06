@@ -1,7 +1,16 @@
 import binascii
-from base64 import b64decode
+from base64 import b64decode, b64encode
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api.dependencies import get_queue
@@ -17,6 +26,32 @@ from app.schemas.responses import (
 )
 
 router = APIRouter()
+
+_PREDICT_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
+    400: {"model": ErrorResponse, "description": "Invalid or undecodable image."},
+    504: {"model": ErrorResponse, "description": "Prediction timed out."},
+}
+
+
+async def _run_inference(queue: Queue, image_b64: str) -> InferenceResponse:
+    """Submit a base64 image through the queue and map failures to HTTP errors.
+
+    Shared by /predict (base64 JSON) and /predict/upload (file) so both behave
+    identically.
+    """
+    try:
+        result = await queue.submit(Job(image=image_b64))
+    except InvalidImageError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Input is not a decodable image.",
+        )
+    except QueueTimeout:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Prediction timed out.",
+        )
+    return InferenceResponse(**result)
 
 
 @router.get("/")
@@ -53,14 +88,8 @@ async def metrics() -> Response:
 @router.post(
     "/predict",
     status_code=status.HTTP_200_OK,
-    summary="Classify an image",
-    responses={
-        400: {
-            "model": ErrorResponse,
-            "description": "Invalid base64 or undecodable image.",
-        },
-        504: {"model": ErrorResponse, "description": "Prediction timed out."},
-    },
+    summary="Classify an image (base64 JSON)",
+    responses=_PREDICT_ERROR_RESPONSES,
 )
 async def predict(
     request: InferenceRequest,
@@ -73,17 +102,26 @@ async def predict(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Image could not be decoded as base64.",
         )
+    return await _run_inference(queue, request.image)
 
-    try:
-        result = await queue.submit(Job(image=request.image))
-    except InvalidImageError:
+
+@router.post(
+    "/predict/upload",
+    status_code=status.HTTP_200_OK,
+    summary="Classify an uploaded image file",
+    responses=_PREDICT_ERROR_RESPONSES,
+)
+async def predict_upload(
+    file: UploadFile = File(...),
+    queue: Queue = Depends(get_queue),
+) -> InferenceResponse:
+    # Read the uploaded bytes, then base64-encode so the same pipeline (which
+    # expects a base64 string) and the same response model are reused.
+    contents = await file.read()
+    if not contents:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Input is valid base64 but not a decodable image.",
+            detail="Uploaded file is empty.",
         )
-    except QueueTimeout:
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="Prediction timed out.",
-        )
-    return InferenceResponse(**result)
+    image_b64 = b64encode(contents).decode()
+    return await _run_inference(queue, image_b64)

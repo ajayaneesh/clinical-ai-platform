@@ -27,8 +27,26 @@ VALID_IMAGE = _png_b64()
 @pytest.fixture
 def running_app():
     # Context-manager form runs lifespan -> starts the queue + worker.
+    # conftest's autouse fixture forces the fast placeholder model.
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+def decoding_app():
+    # For tests that verify IMAGE-DECODE error handling: force TorchModel, which
+    # actually decodes the image (the dummy accepts anything). Still offline/fast
+    # (returns a fixed label). Overrides conftest's dummy for these tests only.
+    from app.api import dependencies
+    from app.models.torch_model import TorchInferenceModel
+
+    original = dependencies.get_model
+    dependencies.get_model = lambda: TorchInferenceModel()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        dependencies.get_model = original
 
 
 def test_full_pipeline_returns_prediction(running_app):
@@ -94,24 +112,64 @@ def test_unknown_route_returns_404(running_app):
     assert response.status_code == 404
 
 
-def test_valid_base64_but_not_an_image_returns_400(running_app):
+def test_valid_base64_but_not_an_image_returns_400(decoding_app):
     # Valid base64 that decodes to a truncated/invalid image (the reported bug):
     # must return 400, NOT hang until a 504 timeout.
-    response = running_app.post(
+    response = decoding_app.post(
         "/predict", json={"image": "iVBORw0KGgoAAAANSUhEUgAAAAUA"}
     )
     assert response.status_code == 400
 
 
-def test_bad_image_does_not_kill_worker(running_app):
+def test_bad_image_does_not_kill_worker(decoding_app):
     # A malformed image must fail only THAT request; the worker keeps running and
     # the next valid request still succeeds.
-    bad = running_app.post("/predict", json={"image": "iVBORw0KGgoAAAANSUhEUgAAAAUA"})
+    bad = decoding_app.post("/predict", json={"image": "iVBORw0KGgoAAAANSUhEUgAAAAUA"})
     assert bad.status_code == 400
 
-    good = running_app.post("/predict", json={"image": VALID_IMAGE})
+    good = decoding_app.post("/predict", json={"image": VALID_IMAGE})
     assert good.status_code == 200
     assert good.json() == {"prediction": "normal", "confidence": 0.95}
+
+
+def _png_bytes() -> bytes:
+    buf = BytesIO()
+    Image.new("RGB", (8, 8), (120, 30, 200)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_upload_returns_same_response_as_predict(running_app):
+    # /predict/upload takes a real file and must return the same shape/values
+    # as /predict for an equivalent image.
+    response = running_app.post(
+        "/predict/upload",
+        files={"file": ("xray.png", _png_bytes(), "image/png")},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"prediction": "normal", "confidence": 0.95}
+
+
+def test_upload_empty_file_returns_400(running_app):
+    response = running_app.post(
+        "/predict/upload",
+        files={"file": ("empty.png", b"", "image/png")},
+    )
+    assert response.status_code == 400
+
+
+def test_upload_non_image_returns_400(decoding_app):
+    # A non-image file: pipeline must fail cleanly with 400, not hang or 500.
+    response = decoding_app.post(
+        "/predict/upload",
+        files={"file": ("notes.txt", b"this is not an image", "text/plain")},
+    )
+    assert response.status_code == 400
+
+
+def test_upload_missing_file_returns_422(running_app):
+    # No file part at all -> FastAPI validation -> 422.
+    response = running_app.post("/predict/upload")
+    assert response.status_code == 422
 
 
 def test_multiple_workers_increase_throughput():
