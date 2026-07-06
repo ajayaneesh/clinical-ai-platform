@@ -19,7 +19,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     queue = LocalQueue(timeout=settings.queue_timeout_seconds)
     app.state.queue = queue
     worker_tasks = start_workers(
-        queue, get_inference_service(), count=settings.worker_count
+        queue,
+        get_inference_service(),
+        max_batch_size=settings.max_batch_size,
+        max_batch_wait=settings.max_batch_wait_ms / 1000,
+        count=settings.worker_count,
     )
     try:
         yield

@@ -11,15 +11,13 @@ NOT clinically validated.
 
 from __future__ import annotations
 
-import io
 import logging
-from base64 import b64decode
 
 import torch
-from PIL import Image
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 
-from app.models.inference import InferenceResult, InvalidImageError
+from app.models.inference import InferenceResult
+from app.services.image_processing import ImageProcessingService
 
 logger = logging.getLogger("app.model")
 
@@ -33,9 +31,10 @@ def _select_device() -> torch.device:
 
 
 class HuggingFaceInferenceModel:
-    def __init__(self, model_id: str) -> None:
+    def __init__(self, model_id: str, image_processing: ImageProcessingService) -> None:
         # Model lifecycle: download + load weights and the matching image
         # processor ONCE, here. Reused for every predict() call.
+        self._images = image_processing
         self._device = _select_device()
         self._processor = AutoImageProcessor.from_pretrained(model_id)
         self._model = AutoModelForImageClassification.from_pretrained(model_id)
@@ -49,21 +48,29 @@ class HuggingFaceInferenceModel:
         )
 
     def predict(self, image: str) -> InferenceResult:
-        try:
-            pixels = Image.open(io.BytesIO(b64decode(image))).convert("RGB")
-        except Exception as exc:
-            raise InvalidImageError(str(exc)) from exc
+        return self.predict_batch([image])[0]
 
-        # The processor applies the EXACT preprocessing the model was trained
-        # with (resize, crop, normalization) — do not hand-roll it.
+    def predict_batch(self, images: list[str]) -> list[InferenceResult]:
+        # Load + validate each image (model-agnostic). Inputs reaching here are
+        # pre-validated by the worker, so the batch stays intact.
+        pixels = [self._images.load(img) for img in images]
+
+        # The processor accepts a LIST of images and returns a batched tensor;
+        # it applies the exact preprocessing the model was trained with.
         inputs = self._processor(images=pixels, return_tensors="pt").to(self._device)
 
         with torch.no_grad():
             logits = self._model(**inputs).logits
             probs = torch.softmax(logits, dim=1)
 
-        idx = int(probs.argmax(dim=1).item())
-        return {
-            "prediction": self._id2label[idx],
-            "confidence": float(probs[0, idx].item()),
-        }
+        # One row of probs per input image; map each to its label.
+        results: list[InferenceResult] = []
+        for row in probs:
+            idx = int(row.argmax().item())
+            results.append(
+                {
+                    "prediction": self._id2label[idx],
+                    "confidence": float(row[idx].item()),
+                }
+            )
+        return results

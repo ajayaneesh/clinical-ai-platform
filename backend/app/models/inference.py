@@ -13,7 +13,12 @@ class InferenceResult(TypedDict):
 class InferenceModel(Protocol):
     def predict(self, image: str) -> InferenceResult: ...
 
+    def predict_batch(self, images: list[str]) -> list[InferenceResult]: ...
+
 
 class DummyInferenceModel:
     def predict(self, image: str) -> InferenceResult:
-        return {"prediction": "normal", "confidence": 0.95}
+        return self.predict_batch([image])[0]
+
+    def predict_batch(self, images: list[str]) -> list[InferenceResult]:
+        return [{"prediction": "normal", "confidence": 0.95} for _ in images]

@@ -4,7 +4,12 @@ from app.core.config import settings
 from app.core.queue import Queue
 from app.models.inference import InferenceModel
 from app.models.torch_model import TorchInferenceModel
+from app.services.image_processing import ImageProcessingService
 from app.services.inference import InferenceService
+
+
+def get_image_processing() -> ImageProcessingService:
+    return ImageProcessingService(max_bytes=settings.max_image_bytes)
 
 
 def get_model() -> InferenceModel:
@@ -15,12 +20,13 @@ def get_model() -> InferenceModel:
     otherwise falls back to the placeholder TorchInferenceModel (fast, no
     download — used by tests and local dev without a model).
     """
+    images = get_image_processing()
     if settings.model_id:
         # Imported lazily so tests / no-model runs don't pull in transformers.
         from app.models.hf_model import HuggingFaceInferenceModel
 
-        return HuggingFaceInferenceModel(settings.model_id)
-    return TorchInferenceModel()
+        return HuggingFaceInferenceModel(settings.model_id, images)
+    return TorchInferenceModel(images)
 
 
 def get_inference_service() -> InferenceService:

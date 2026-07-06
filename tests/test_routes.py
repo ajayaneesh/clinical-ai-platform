@@ -110,13 +110,22 @@ def test_worker_offloads_prediction_and_does_not_block_loop():
 
     class SlowModel:
         def predict(self, image: str) -> InferenceResult:
+            return self.predict_batch([image])[0]
+
+        def predict_batch(self, images: list[str]) -> list[InferenceResult]:
             time.sleep(SLOW)  # blocking, synchronous
-            return {"prediction": "normal", "confidence": 0.95}
+            return [{"prediction": "normal", "confidence": 0.95} for _ in images]
 
     async def scenario() -> tuple[float, float]:
         loop = asyncio.get_running_loop()
         queue = LocalQueue()
-        worker_tasks = start_workers(queue, InferenceService(SlowModel()), count=1)
+        worker_tasks = start_workers(
+            queue,
+            InferenceService(SlowModel()),
+            max_batch_size=8,
+            max_batch_wait=0.02,
+            count=1,
+        )
         try:
             start = loop.time()
             predict_task = asyncio.create_task(queue.submit(Job(image="x")))

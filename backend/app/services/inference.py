@@ -7,3 +7,6 @@ class InferenceService:
 
     def predict(self, image: str) -> InferenceResult:
         return self._model.predict(image)
+
+    def predict_batch(self, images: list[str]) -> list[InferenceResult]:
+        return self._model.predict_batch(images)

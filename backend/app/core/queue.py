@@ -29,6 +29,8 @@ class Queue(Protocol):
 
     async def get(self) -> Job: ...
 
+    async def get_batch(self, max_size: int, max_wait: float) -> list[Job]: ...
+
     def complete(self, job_id: str, result: InferenceResult) -> None: ...
 
     def fail(self, job_id: str, exc: Exception) -> None: ...
@@ -55,6 +57,35 @@ class LocalQueue:
 
     async def get(self) -> Job:
         return await self._queue.get()
+
+    async def get_batch(self, max_size: int, max_wait: float) -> list[Job]:
+        """Collect up to max_size jobs, waiting at most max_wait for the batch
+        to fill after the first job arrives.
+
+        Blocks for the first job (no busy-waiting when idle), then greedily takes
+        whatever is already queued, and keeps waiting for stragglers until either
+        max_size is reached or max_wait elapses.
+        """
+        loop = asyncio.get_running_loop()
+        batch = [await self._queue.get()]  # block until at least one job
+        deadline = loop.time() + max_wait
+
+        while len(batch) < max_size:
+            # Grab anything already waiting without blocking.
+            try:
+                batch.append(self._queue.get_nowait())
+                continue
+            except asyncio.QueueEmpty:
+                pass
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            try:
+                job = await asyncio.wait_for(self._queue.get(), timeout=remaining)
+                batch.append(job)
+            except asyncio.TimeoutError:
+                break
+        return batch
 
     def complete(self, job_id: str, result: InferenceResult) -> None:
         future = self._results.get(job_id)

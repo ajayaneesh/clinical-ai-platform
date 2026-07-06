@@ -39,9 +39,11 @@ def decoding_app():
     # (returns a fixed label). Overrides conftest's dummy for these tests only.
     from app.api import dependencies
     from app.models.torch_model import TorchInferenceModel
+    from app.services.image_processing import ImageProcessingService
 
     original = dependencies.get_model
-    dependencies.get_model = lambda: TorchInferenceModel()
+    images = ImageProcessingService(max_bytes=10 * 1024 * 1024)
+    dependencies.get_model = lambda: TorchInferenceModel(images)
     try:
         with TestClient(app) as c:
             yield c
@@ -172,10 +174,10 @@ def test_upload_missing_file_returns_422(running_app):
     assert response.status_code == 422
 
 
-def test_multiple_workers_increase_throughput():
-    # Two workers processing a fixed-latency model must finish a batch of jobs
-    # in roughly half the time a single worker would. Proves the worker-count
-    # fix scales throughput (see docs/architecture/performance-baseline.md).
+def test_batching_processes_many_jobs_in_one_pass():
+    # A single batching worker must coalesce concurrent jobs into ONE forward
+    # pass: N jobs finish in ~one batch's time, NOT N * per-job time. Proves
+    # batch inference (see docs/architecture/performance-baseline.md).
     import asyncio
     import time
 
@@ -184,17 +186,28 @@ def test_multiple_workers_increase_throughput():
     from app.services.inference import InferenceService
     from app.workers.inference_worker import start_workers
 
-    DELAY = 0.02
+    DELAY = 0.1  # time for ONE batch forward pass
     JOBS = 8
 
-    class FixedModel:
+    class BatchModel:
+        # Batch call costs one DELAY regardless of batch size (models the GPU
+        # amortization). Per-item fallback would cost DELAY each.
         def predict(self, image: str) -> InferenceResult:
-            time.sleep(DELAY)
-            return {"prediction": "normal", "confidence": 0.95}
+            return self.predict_batch([image])[0]
 
-    async def run_with(count: int) -> float:
+        def predict_batch(self, images: list[str]) -> list[InferenceResult]:
+            time.sleep(DELAY)
+            return [{"prediction": "normal", "confidence": 0.95} for _ in images]
+
+    async def scenario() -> float:
         queue = LocalQueue(timeout=30)
-        tasks = start_workers(queue, InferenceService(FixedModel()), count=count)
+        tasks = start_workers(
+            queue,
+            InferenceService(BatchModel()),
+            max_batch_size=JOBS,
+            max_batch_wait=0.05,
+            count=1,
+        )
         try:
             loop = asyncio.get_running_loop()
             start = loop.time()
@@ -204,9 +217,10 @@ def test_multiple_workers_increase_throughput():
             for task in tasks:
                 task.cancel()
 
-    one = asyncio.run(run_with(1))
-    two = asyncio.run(run_with(2))
+    elapsed = asyncio.run(scenario())
 
-    # 1 worker is serial (~JOBS * DELAY); 2 workers roughly halve it. Use a loose
-    # bound to stay robust against scheduling jitter.
-    assert two < one * 0.75, f"2 workers ({two:.3f}s) not faster than 1 ({one:.3f}s)"
+    # Batched: ~1 * DELAY. Un-batched (serial) would be ~JOBS * DELAY. Assert we
+    # are far below the serial cost — the jobs coalesced into ~one batch.
+    assert elapsed < JOBS * DELAY * 0.5, (
+        f"jobs did not batch: {elapsed:.3f}s ~ serial {JOBS * DELAY:.3f}s"
+    )
