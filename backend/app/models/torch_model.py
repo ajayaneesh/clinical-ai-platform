@@ -9,11 +9,13 @@ placeholder; swap the marked section for a trained model + real class labels.
 from __future__ import annotations
 
 import logging
+import time
 
 import torch
 from torch import nn
 from torchvision import transforms
 
+from app.core.metrics import FORWARD_PASS_LATENCY, PREPROCESS_LATENCY
 from app.models.inference import InferenceResult
 from app.services.image_processing import ImageProcessingService
 
@@ -54,16 +56,29 @@ class TorchInferenceModel:
 
     def predict_batch(self, images: list[str]) -> list[InferenceResult]:
         # 1. Load + validate + preprocess each image, then STACK into one tensor
-        #    of shape [N, 3, 224, 224]. A failure here raises InvalidImageError;
-        #    the worker validates per-image first, so inputs reaching here are
-        #    already valid and the batch stays intact.
+        #    of shape [N, 3, 224, 224].
+        t0 = time.perf_counter()
         tensors = [self._preprocess(self._images.load(img)) for img in images]
         batch = torch.stack(tensors).to(self._device)
+        preprocess_s = time.perf_counter() - t0
+        PREPROCESS_LATENCY.observe(preprocess_s)
 
         # 2. ONE forward pass over the whole batch (no_grad: inference only).
+        t1 = time.perf_counter()
         with torch.no_grad():
             logits = self._model(batch)
             probs = torch.softmax(logits, dim=1)
+        forward_s = time.perf_counter() - t1
+        FORWARD_PASS_LATENCY.observe(forward_s)
+
+        logger.info(
+            "predict_batch",
+            extra={
+                "batch_size": len(images),
+                "preprocess_ms": round(preprocess_s * 1000, 2),
+                "inference_ms": round(forward_s * 1000, 2),
+            },
+        )
 
         # --- PLACEHOLDER label mapping -----------------------------------
         # The batched forward pass above is real; the labels below are fake.

@@ -69,24 +69,25 @@ def test_predict_uses_injected_model():
     # through the queue to the awaiting request.
     from app.api import dependencies
     from app.models.inference import (
-        DummyInferenceModel,
-        InferenceModel,
         InferenceResult,
     )
 
     class FakeModel:
         def predict(self, image: str) -> InferenceResult:
-            return {"prediction": "critical", "confidence": 0.42}
+            return self.predict_batch([image])[0]
 
-    original: InferenceModel = DummyInferenceModel()
-    dependencies.get_model = lambda: FakeModel()  # type: ignore[assignment]
+        def predict_batch(self, images: list[str]) -> list[InferenceResult]:
+            return [{"prediction": "critical", "confidence": 0.42} for _ in images]
+
+    original = dependencies._build_current_model
+    dependencies._build_current_model = lambda: FakeModel()  # type: ignore[assignment]
     try:
         with TestClient(app) as c:
             response = c.post("/predict", json={"image": VALID_IMAGE})
         assert response.status_code == 200
         assert response.json() == {"prediction": "critical", "confidence": 0.42}
     finally:
-        dependencies.get_model = lambda: original  # type: ignore[assignment]
+        dependencies._build_current_model = original
 
 
 def test_worker_offloads_prediction_and_does_not_block_loop():
@@ -227,4 +228,9 @@ def test_metrics_endpoint_exposes_prometheus_text():
     body = response.text
     assert "http_request_latency_seconds" in body
     assert "inference_latency_seconds" in body
+    assert "preprocess_latency_seconds" in body
+    assert "forward_pass_latency_seconds" in body
+    assert "model_cold_start_seconds" in body
+    assert "process_cpu_percent" in body
+    assert "process_memory_bytes" in body
     assert "http_requests_total" in body

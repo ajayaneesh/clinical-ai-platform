@@ -24,5 +24,8 @@ class Settings(BaseSettings):
     max_batch_size: int = 8
     max_batch_wait_ms: int = 20
 
+    # How often the background task samples process CPU/memory into gauges.
+    resource_sample_interval_s: float = 5.0
+
 
 settings = Settings()

@@ -41,14 +41,14 @@ def decoding_app():
     from app.models.torch_model import TorchInferenceModel
     from app.services.image_processing import ImageProcessingService
 
-    original = dependencies.get_model
+    original = dependencies._build_current_model
     images = ImageProcessingService(max_bytes=10 * 1024 * 1024)
-    dependencies.get_model = lambda: TorchInferenceModel(images)
+    dependencies._build_current_model = lambda: TorchInferenceModel(images)
     try:
         with TestClient(app) as c:
             yield c
     finally:
-        dependencies.get_model = original
+        dependencies._build_current_model = original
 
 
 def test_full_pipeline_returns_prediction(running_app):

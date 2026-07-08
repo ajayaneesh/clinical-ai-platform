@@ -12,10 +12,12 @@ NOT clinically validated.
 from __future__ import annotations
 
 import logging
+import time
 
 import torch
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 
+from app.core.metrics import FORWARD_PASS_LATENCY, PREPROCESS_LATENCY
 from app.models.inference import InferenceResult
 from app.services.image_processing import ImageProcessingService
 
@@ -51,17 +53,28 @@ class HuggingFaceInferenceModel:
         return self.predict_batch([image])[0]
 
     def predict_batch(self, images: list[str]) -> list[InferenceResult]:
-        # Load + validate each image (model-agnostic). Inputs reaching here are
-        # pre-validated by the worker, so the batch stays intact.
+        # Load + validate each image, then run the processor (resize/crop/norm).
+        t0 = time.perf_counter()
         pixels = [self._images.load(img) for img in images]
-
-        # The processor accepts a LIST of images and returns a batched tensor;
-        # it applies the exact preprocessing the model was trained with.
         inputs = self._processor(images=pixels, return_tensors="pt").to(self._device)
+        preprocess_s = time.perf_counter() - t0
+        PREPROCESS_LATENCY.observe(preprocess_s)
 
+        t1 = time.perf_counter()
         with torch.no_grad():
             logits = self._model(**inputs).logits
             probs = torch.softmax(logits, dim=1)
+        forward_s = time.perf_counter() - t1
+        FORWARD_PASS_LATENCY.observe(forward_s)
+
+        logger.info(
+            "predict_batch",
+            extra={
+                "batch_size": len(images),
+                "preprocess_ms": round(preprocess_s * 1000, 2),
+                "inference_ms": round(forward_s * 1000, 2),
+            },
+        )
 
         # One row of probs per input image; map each to its label.
         results: list[InferenceResult] = []
