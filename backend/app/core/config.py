@@ -27,5 +27,12 @@ class Settings(BaseSettings):
     # How often the background task samples process CPU/memory into gauges.
     resource_sample_interval_s: float = 5.0
 
+    # Load an embedding model at startup so /embed works.
+    enable_embeddings: bool = True
+
+    # Which embedding model to use: "biomedclip" (medical, default) or
+    # "laion-clip" (general-purpose CLIP). Switch to compare the two on X-rays.
+    embedding_model: str = "laion-clip"
+
 
 settings = Settings()

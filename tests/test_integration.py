@@ -51,6 +51,38 @@ def decoding_app():
         dependencies._build_current_model = original
 
 
+@pytest.fixture
+def embedding_app():
+    # Force embeddings ON with a FAKE embedding service (no BiomedCLIP download).
+    from app.api import dependencies
+    from app.core.config import settings
+    from app.services.embedding import EmbeddingService
+
+    class FakeEmbeddingModel:
+        @property
+        def name(self) -> str:
+            return "fake"
+
+        def embed(self, image: str) -> list[float]:
+            return [0.1, 0.2, 0.3]
+
+        def embed_batch(self, images: list[str]) -> list[list[float]]:
+            return [[0.1, 0.2, 0.3] for _ in images]
+
+    original_flag = settings.enable_embeddings
+    original_builder = dependencies.build_embedding_service
+    settings.enable_embeddings = True
+    dependencies.build_embedding_service = lambda: EmbeddingService(
+        FakeEmbeddingModel()
+    )
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        settings.enable_embeddings = original_flag
+        dependencies.build_embedding_service = original_builder
+
+
 def test_full_pipeline_returns_prediction(running_app):
     # API -> queue -> worker -> dummy model -> response, all wired up live.
     response = running_app.post("/predict", json={"image": VALID_IMAGE})
@@ -224,3 +256,118 @@ def test_batching_processes_many_jobs_in_one_pass():
     assert elapsed < JOBS * DELAY * 0.5, (
         f"jobs did not batch: {elapsed:.3f}s ~ serial {JOBS * DELAY:.3f}s"
     )
+
+
+def test_embed_returns_vector(embedding_app):
+    response = embedding_app.post("/embed", json={"image": VALID_IMAGE})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["embedding"] == [0.1, 0.2, 0.3]
+    assert body["dimension"] == 3
+    assert body["model"] == "fake"
+    assert "embedding_id" in body
+    assert isinstance(body["inference_ms"], (int, float))
+
+
+def test_embed_stores_vector_in_memory(embedding_app):
+    # Each /embed call stores the vector; two calls -> two stored, distinct ids.
+    r1 = embedding_app.post("/embed", json={"image": VALID_IMAGE})
+    r2 = embedding_app.post("/embed", json={"image": VALID_IMAGE})
+    id1 = r1.json()["embedding_id"]
+    id2 = r2.json()["embedding_id"]
+    assert id1 != id2
+
+    store = embedding_app.app.state.embedding_store
+    assert store.count() == 2
+    stored = store.get(id1)
+    assert stored.vector == [0.1, 0.2, 0.3]
+    assert stored.model == "fake"
+
+
+def test_embed_rejects_invalid_base64(embedding_app):
+    response = embedding_app.post("/embed", json={"image": "not base64!!!"})
+    assert response.status_code == 400
+
+
+def test_embed_returns_503_when_disabled(running_app):
+    # Embeddings not enabled (default) -> /embed is unavailable.
+    response = running_app.post("/embed", json={"image": VALID_IMAGE})
+    assert response.status_code == 503
+
+
+def test_embed_upload_returns_same_as_embed(embedding_app):
+    # /embed/upload takes a real file and returns the same shape as /embed.
+    response = embedding_app.post(
+        "/embed/upload",
+        files={"file": ("xray.png", _png_bytes(), "image/png")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["embedding"] == [0.1, 0.2, 0.3]
+    assert body["dimension"] == 3
+    assert body["model"] == "fake"
+    assert "embedding_id" in body
+
+
+def test_embed_upload_empty_file_returns_400(embedding_app):
+    response = embedding_app.post(
+        "/embed/upload",
+        files={"file": ("empty.png", b"", "image/png")},
+    )
+    assert response.status_code == 400
+
+
+def test_embed_upload_returns_503_when_disabled(running_app):
+    response = running_app.post(
+        "/embed/upload",
+        files={"file": ("xray.png", _png_bytes(), "image/png")},
+    )
+    assert response.status_code == 503
+
+
+def test_search_returns_top_hits_and_measurements(embedding_app):
+    # Store a few embeddings first, then search.
+    for _ in range(3):
+        embedding_app.post("/embed", json={"image": VALID_IMAGE})
+
+    response = embedding_app.post("/search", json={"image": VALID_IMAGE})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["searched"] == 3
+    assert len(body["results"]) == 3  # fewer than top_k=5 stored -> returns all
+    # The three measurements the mini search engine reports:
+    assert isinstance(body["embedding_ms"], (int, float))
+    assert isinstance(body["search_ms"], (int, float))
+    assert body["store_memory_bytes"] == 3 * 3 * 8  # 3 vectors x dim 3 x 8 bytes
+    # Each hit has an id and a cosine score.
+    for hit in body["results"]:
+        assert "embedding_id" in hit
+        assert -1.0 <= hit["score"] <= 1.0
+
+
+def test_search_empty_store_returns_no_results(embedding_app):
+    response = embedding_app.post("/search", json={"image": VALID_IMAGE})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["searched"] == 0
+    assert body["results"] == []
+
+
+def test_search_upload_works(embedding_app):
+    embedding_app.post("/embed", json={"image": VALID_IMAGE})
+    response = embedding_app.post(
+        "/search/upload",
+        files={"file": ("q.png", _png_bytes(), "image/png")},
+    )
+    assert response.status_code == 200
+    assert response.json()["searched"] == 1
+
+
+def test_search_rejects_invalid_base64(embedding_app):
+    response = embedding_app.post("/search", json={"image": "not base64!!!"})
+    assert response.status_code == 400
+
+
+def test_search_returns_503_when_disabled(running_app):
+    response = running_app.post("/search", json={"image": VALID_IMAGE})
+    assert response.status_code == 503

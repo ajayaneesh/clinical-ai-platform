@@ -1,3 +1,4 @@
+import asyncio
 import binascii
 from base64 import b64decode, b64encode
 
@@ -13,17 +14,26 @@ from fastapi import (
 )
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from app.api.dependencies import get_queue
+from app.api.dependencies import (
+    get_embedding_service,
+    get_embedding_store,
+    get_queue,
+)
+from app.core.embedding_store import EmbeddingStore
 from app.core.queue import Job, Queue, QueueTimeout
 from app.models.inference import InvalidImageError
 from app.schemas.requests import InferenceRequest
 from app.schemas.responses import (
+    EmbeddingResponse,
     ErrorResponse,
     HealthResponse,
     InferenceResponse,
     ReadyResponse,
     RootResponse,
+    SearchHitResponse,
+    SearchResponse,
 )
+from app.services.embedding import EmbeddingService
 
 router = APIRouter()
 
@@ -125,3 +135,162 @@ async def predict_upload(
         )
     image_b64 = b64encode(contents).decode()
     return await _run_inference(queue, image_b64)
+
+
+async def _run_embedding(
+    service: EmbeddingService, store: EmbeddingStore, image_b64: str
+) -> EmbeddingResponse:
+    """Embed a base64 image, store the vector, return id + model + timing.
+
+    Shared by /embed (base64 JSON) and /embed/upload (file) so both behave
+    identically.
+    """
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    try:
+        # Blocking forward pass -> offload to a thread so the event loop stays free.
+        vector = await loop.run_in_executor(None, service.embed, image_b64)
+    except InvalidImageError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Input is not a decodable image.",
+        )
+    inference_ms = round((loop.time() - start) * 1000, 2)
+
+    embedding_id = store.add(vector, service.model_name)
+    return EmbeddingResponse(
+        embedding_id=embedding_id,
+        model=service.model_name,
+        embedding=vector,
+        dimension=len(vector),
+        inference_ms=inference_ms,
+    )
+
+
+@router.post(
+    "/embed",
+    status_code=status.HTTP_200_OK,
+    summary="Generate an embedding for an image (base64 JSON)",
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid or undecodable image."},
+    },
+)
+async def embed(
+    request: InferenceRequest,
+    service: EmbeddingService = Depends(get_embedding_service),
+    store: EmbeddingStore = Depends(get_embedding_store),
+) -> EmbeddingResponse:
+    try:
+        b64decode(request.image, validate=True)
+    except binascii.Error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Image could not be decoded as base64.",
+        )
+    return await _run_embedding(service, store, request.image)
+
+
+@router.post(
+    "/embed/upload",
+    status_code=status.HTTP_200_OK,
+    summary="Generate an embedding for an uploaded image file",
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid or undecodable image."},
+    },
+)
+async def embed_upload(
+    file: UploadFile = File(...),
+    service: EmbeddingService = Depends(get_embedding_service),
+    store: EmbeddingStore = Depends(get_embedding_store),
+) -> EmbeddingResponse:
+    # Read the uploaded bytes, base64-encode, reuse the same embedding path.
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty.",
+        )
+    return await _run_embedding(service, store, b64encode(contents).decode())
+
+
+async def _run_search(
+    service: EmbeddingService,
+    store: EmbeddingStore,
+    image_b64: str,
+    top_k: int,
+) -> SearchResponse:
+    """Embed a query image, search the store by cosine similarity, and report
+    the top-k hits plus timing/memory measurements."""
+    loop = asyncio.get_running_loop()
+
+    # 1. Embedding generation time.
+    t0 = loop.time()
+    try:
+        query_vec = await loop.run_in_executor(None, service.embed, image_b64)
+    except InvalidImageError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Input is not a decodable image.",
+        )
+    embedding_ms = round((loop.time() - t0) * 1000, 2)
+
+    # 2. Similarity search latency (cosine is cheap CPU work; kept on the loop).
+    t1 = loop.time()
+    hits = store.search(query_vec, top_k=top_k)
+    search_ms = round((loop.time() - t1) * 1000, 2)
+
+    return SearchResponse(
+        results=[
+            SearchHitResponse(embedding_id=h.embedding_id, score=h.score, model=h.model)
+            for h in hits
+        ],
+        searched=store.count(),
+        embedding_ms=embedding_ms,
+        search_ms=search_ms,
+        store_memory_bytes=store.memory_bytes(),
+    )
+
+
+@router.post(
+    "/search",
+    status_code=status.HTTP_200_OK,
+    summary="Find the top-k stored images most similar to a query image (base64)",
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid or undecodable image."},
+    },
+)
+async def search(
+    request: InferenceRequest,
+    service: EmbeddingService = Depends(get_embedding_service),
+    store: EmbeddingStore = Depends(get_embedding_store),
+) -> SearchResponse:
+    try:
+        b64decode(request.image, validate=True)
+    except binascii.Error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Image could not be decoded as base64.",
+        )
+    return await _run_search(service, store, request.image, top_k=5)
+
+
+@router.post(
+    "/search/upload",
+    status_code=status.HTTP_200_OK,
+    summary="Find the top-k stored images most similar to an uploaded query image",
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid or undecodable image."},
+    },
+)
+async def search_upload(
+    file: UploadFile = File(...),
+    service: EmbeddingService = Depends(get_embedding_service),
+    store: EmbeddingStore = Depends(get_embedding_store),
+) -> SearchResponse:
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty.",
+        )
+    return await _run_search(service, store, b64encode(contents).decode(), top_k=5)

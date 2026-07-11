@@ -8,6 +8,7 @@ dependencies = [
     "fastapi>=0.138.1",
     "matplotlib>=3.11.0",
     "numpy>=2.4.6",
+    "open-clip-torch>=3.3.0",
     "pandas>=3.0.3",
     "pillow>=12.3.0",
     "prometheus-client>=0.25.0",
@@ -59,5 +60,5 @@ testpaths = ["tests"]
 # Some ML libraries ship no type stubs; ignore missing imports for those only,
 # so our own code stays strictly type-checked.
 [[tool.mypy.overrides]]
-module = ["torchvision.*", "transformers.*", "psutil"]
+module = ["torchvision.*", "transformers.*", "psutil", "open_clip"]
 ignore_missing_imports = true
