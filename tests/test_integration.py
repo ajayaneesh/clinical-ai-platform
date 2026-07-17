@@ -371,3 +371,55 @@ def test_search_rejects_invalid_base64(embedding_app):
 def test_search_returns_503_when_disabled(running_app):
     response = running_app.post("/search", json={"image": VALID_IMAGE})
     assert response.status_code == 503
+
+
+def test_embed_stores_and_returns_metadata(embedding_app):
+    response = embedding_app.post(
+        "/embed",
+        json={
+            "image": VALID_IMAGE,
+            "filename": "patient_042_chest_xray.png",
+            "diagnosis_label": "pneumonia",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["filename"] == "patient_042_chest_xray.png"
+    assert body["diagnosis_label"] == "pneumonia"
+    assert body["timestamp"]  # server-generated, non-empty
+
+    store = embedding_app.app.state.embedding_store
+    stored = store.get(body["embedding_id"])
+    assert stored.filename == "patient_042_chest_xray.png"
+    assert stored.diagnosis_label == "pneumonia"
+    assert stored.timestamp == body["timestamp"]
+
+
+def test_embed_upload_defaults_filename_from_file(embedding_app):
+    response = embedding_app.post(
+        "/embed/upload",
+        files={"file": ("xray.png", _png_bytes(), "image/png")},
+        params={"diagnosis_label": "normal"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["filename"] == "xray.png"
+    assert body["diagnosis_label"] == "normal"
+
+
+def test_search_filters_by_diagnosis_label(embedding_app):
+    embedding_app.post(
+        "/embed", json={"image": VALID_IMAGE, "diagnosis_label": "pneumonia"}
+    )
+    embedding_app.post(
+        "/embed", json={"image": VALID_IMAGE, "diagnosis_label": "normal"}
+    )
+
+    response = embedding_app.post(
+        "/search", json={"image": VALID_IMAGE, "diagnosis_label": "pneumonia"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["searched"] == 2  # store still holds both
+    assert len(body["results"]) == 1
+    assert body["results"][0]["diagnosis_label"] == "pneumonia"

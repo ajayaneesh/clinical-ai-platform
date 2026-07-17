@@ -34,5 +34,13 @@ class Settings(BaseSettings):
     # "laion-clip" (general-purpose CLIP). Switch to compare the two on X-rays.
     embedding_model: str = "laion-clip"
 
+    # Which embedding store backs /embed and /search: "memory" (default, no
+    # setup, lost on restart) or "qdrant" (persistent, indexed at scale).
+    vector_store: str = "memory"
+
+    qdrant_host: str = "localhost"
+    qdrant_port: int = 6333
+    qdrant_collection: str = "clinical_embeddings"
+
 
 settings = Settings()

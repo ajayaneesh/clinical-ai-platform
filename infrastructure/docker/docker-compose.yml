@@ -13,5 +13,27 @@ services:
       # your Mac are visible instantly. Combined with --reload below, the server
       # restarts on save — no rebuild per code change.
       - ../../backend:/app/backend
+    environment:
+      # Container-to-container DNS name, not localhost — "qdrant" resolves to
+      # the service below on the compose network.
+      CLINICAL_AI_VECTOR_STORE: qdrant
+      CLINICAL_AI_QDRANT_HOST: qdrant
+      CLINICAL_AI_QDRANT_PORT: 6333
+    depends_on:
+      - qdrant
     # Override the image's CMD to add --reload for local development.
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    ports:
+      # REST API and gRPC, exposed to the host for local debugging/inspection.
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      # Named volume so the collection survives container restarts.
+      - qdrant_storage:/qdrant/storage
+
+volumes:
+  qdrant_storage:
+

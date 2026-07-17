@@ -1,4 +1,4 @@
-from app.core.embedding_store import InMemoryEmbeddingStore
+from app.core.embedding_store import InMemoryEmbeddingStore, QdrantEmbeddingStore
 
 
 def test_add_returns_unique_ids():
@@ -54,5 +54,97 @@ def test_search_respects_top_k():
 def test_memory_bytes_scales_with_vectors():
     store = InMemoryEmbeddingStore()
     assert store.memory_bytes() == 0
+    store.add([0.0] * 512, "m")
+    assert store.memory_bytes() == 512 * 8
+
+
+def test_add_stores_metadata():
+    store = InMemoryEmbeddingStore()
+    eid = store.add(
+        [0.1, 0.2],
+        "m",
+        filename="scan.png",
+        diagnosis_label="pneumonia",
+        timestamp="2026-07-15T00:00:00+00:00",
+    )
+    stored = store.get(eid)
+    assert stored.filename == "scan.png"
+    assert stored.diagnosis_label == "pneumonia"
+    assert stored.timestamp == "2026-07-15T00:00:00+00:00"
+
+
+def test_search_filters_by_diagnosis_label():
+    store = InMemoryEmbeddingStore()
+    id_match = store.add([1.0, 0.0], "m", diagnosis_label="pneumonia")
+    store.add([1.0, 0.0], "m", diagnosis_label="normal")
+
+    hits = store.search([1.0, 0.0], top_k=5, diagnosis_label="pneumonia")
+    assert [h.embedding_id for h in hits] == [id_match]
+
+
+# --- QdrantEmbeddingStore ---------------------------------------------------
+# Runs against Qdrant's real in-process backend (no server) via
+# QdrantEmbeddingStore.in_memory(), so these exercise real Qdrant behavior
+# rather than a mock.
+
+
+def test_qdrant_add_and_get_roundtrips():
+    store = QdrantEmbeddingStore.in_memory()
+    eid = store.add(
+        [0.1, 0.2, 0.3],
+        "biomedclip",
+        filename="scan.png",
+        diagnosis_label="pneumonia",
+        timestamp="2026-07-15T00:00:00+00:00",
+    )
+    stored = store.get(eid)
+    assert stored.vector == [0.1, 0.2, 0.3]
+    assert stored.model == "biomedclip"
+    assert stored.dimension == 3
+    assert stored.filename == "scan.png"
+    assert stored.diagnosis_label == "pneumonia"
+    assert stored.timestamp == "2026-07-15T00:00:00+00:00"
+    assert stored.embedding_id == eid
+
+
+def test_qdrant_empty_store():
+    store = QdrantEmbeddingStore.in_memory()
+    assert store.count() == 0
+    assert store.all() == []
+    assert store.memory_bytes() == 0
+    assert store.search([1.0, 0.0], top_k=5) == []
+
+
+def test_qdrant_count_and_all():
+    store = QdrantEmbeddingStore.in_memory()
+    store.add([0.1, 0.2], "m")
+    store.add([0.3, 0.4], "m")
+    assert store.count() == 2
+    assert len(store.all()) == 2
+
+
+def test_qdrant_search_ranks_by_similarity():
+    store = QdrantEmbeddingStore.in_memory()
+    id_same = store.add([1.0, 0.0], "m")
+    store.add([0.0, 1.0], "m")
+    id_opp = store.add([-1.0, 0.0], "m")
+
+    hits = store.search([1.0, 0.0], top_k=3)
+    assert hits[0].embedding_id == id_same
+    assert hits[-1].embedding_id == id_opp
+    assert hits[0].score > hits[1].score > hits[2].score
+
+
+def test_qdrant_search_filters_by_diagnosis_label():
+    store = QdrantEmbeddingStore.in_memory()
+    id_match = store.add([1.0, 0.0], "m", diagnosis_label="pneumonia")
+    store.add([1.0, 0.0], "m", diagnosis_label="normal")
+
+    hits = store.search([1.0, 0.0], top_k=5, diagnosis_label="pneumonia")
+    assert [h.embedding_id for h in hits] == [id_match]
+
+
+def test_qdrant_memory_bytes_scales_with_vectors():
+    store = QdrantEmbeddingStore.in_memory()
     store.add([0.0] * 512, "m")
     assert store.memory_bytes() == 512 * 8

@@ -51,6 +51,21 @@ class EmbeddingResponse(BaseModel):
         description="Time to compute the embedding, in milliseconds.",
         examples=[42.7],
     )
+    filename: str | None = Field(
+        default=None,
+        description="Original filename stored alongside the vector, if provided.",
+        examples=["patient_042_chest_xray.png"],
+    )
+    diagnosis_label: str | None = Field(
+        default=None,
+        description="Diagnosis label stored alongside the vector, if provided.",
+        examples=["pneumonia"],
+    )
+    timestamp: str | None = Field(
+        default=None,
+        description="ISO 8601 timestamp of when the embedding was stored.",
+        examples=["2026-07-15T10:32:00+00:00"],
+    )
 
 
 class SearchHitResponse(BaseModel):
@@ -60,6 +75,9 @@ class SearchHitResponse(BaseModel):
         examples=[0.87],
     )
     model: str = Field(examples=["biomedclip"])
+    filename: str | None = Field(default=None, examples=["patient_042_chest_xray.png"])
+    diagnosis_label: str | None = Field(default=None, examples=["pneumonia"])
+    timestamp: str | None = Field(default=None, examples=["2026-07-15T10:32:00+00:00"])
 
 
 class SearchResponse(BaseModel):

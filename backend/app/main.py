@@ -9,7 +9,6 @@ from app.api import dependencies
 from app.api.dependencies import get_inference_service
 from app.api.routes import router
 from app.core.config import settings
-from app.core.embedding_store import InMemoryEmbeddingStore
 from app.core.logging import configure_logging
 from app.core.metrics import MODEL_COLD_START
 from app.core.middleware import add_logging_middleware
@@ -37,7 +36,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Embedding model (BiomedCLIP): load once at startup, only if enabled.
     # /embed returns 503 if this was never set.
     app.state.embedding_service = None
-    app.state.embedding_store = InMemoryEmbeddingStore()
+    app.state.embedding_store = dependencies.build_embedding_store()
     if settings.enable_embeddings:
         app.state.embedding_service = dependencies.build_embedding_service()
         logger.info("embedding_service_loaded")

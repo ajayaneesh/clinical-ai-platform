@@ -54,3 +54,46 @@ def test_unknown_embedding_model_raises(monkeypatch):
             dependencies.build_embedding_service()
     finally:
         settings.embedding_model = original
+
+
+def test_vector_store_config_default():
+    from app.core.config import Settings
+
+    assert Settings().vector_store == "memory"
+
+
+def test_build_embedding_store_memory_default():
+    from app.api import dependencies
+    from app.core.embedding_store import InMemoryEmbeddingStore
+
+    store = dependencies.build_embedding_store()
+    assert isinstance(store, InMemoryEmbeddingStore)
+
+
+def test_build_embedding_store_qdrant_selectable(monkeypatch):
+    from app.api import dependencies
+    from app.core.config import settings
+    from app.core.embedding_store import QdrantEmbeddingStore
+
+    original = settings.vector_store
+    settings.vector_store = "qdrant"
+    try:
+        store = dependencies.build_embedding_store()
+        assert isinstance(store, QdrantEmbeddingStore)
+    finally:
+        settings.vector_store = original
+
+
+def test_unknown_vector_store_raises():
+    import pytest
+
+    from app.api import dependencies
+    from app.core.config import settings
+
+    original = settings.vector_store
+    settings.vector_store = "does-not-exist"
+    try:
+        with pytest.raises(ValueError):
+            dependencies.build_embedding_store()
+    finally:
+        settings.vector_store = original

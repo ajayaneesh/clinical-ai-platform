@@ -1,6 +1,7 @@
 import asyncio
 import binascii
 from base64 import b64decode, b64encode
+from datetime import datetime, timezone
 
 from fastapi import (
     APIRouter,
@@ -22,7 +23,7 @@ from app.api.dependencies import (
 from app.core.embedding_store import EmbeddingStore
 from app.core.queue import Job, Queue, QueueTimeout
 from app.models.inference import InvalidImageError
-from app.schemas.requests import InferenceRequest
+from app.schemas.requests import EmbedRequest, InferenceRequest, SearchRequest
 from app.schemas.responses import (
     EmbeddingResponse,
     ErrorResponse,
@@ -138,9 +139,13 @@ async def predict_upload(
 
 
 async def _run_embedding(
-    service: EmbeddingService, store: EmbeddingStore, image_b64: str
+    service: EmbeddingService,
+    store: EmbeddingStore,
+    image_b64: str,
+    filename: str | None,
+    diagnosis_label: str | None,
 ) -> EmbeddingResponse:
-    """Embed a base64 image, store the vector, return id + model + timing.
+    """Embed a base64 image, store the vector + metadata, return id + timing.
 
     Shared by /embed (base64 JSON) and /embed/upload (file) so both behave
     identically.
@@ -157,13 +162,23 @@ async def _run_embedding(
         )
     inference_ms = round((loop.time() - start) * 1000, 2)
 
-    embedding_id = store.add(vector, service.model_name)
+    timestamp = datetime.now(timezone.utc).isoformat()
+    embedding_id = store.add(
+        vector,
+        service.model_name,
+        filename=filename,
+        diagnosis_label=diagnosis_label,
+        timestamp=timestamp,
+    )
     return EmbeddingResponse(
         embedding_id=embedding_id,
         model=service.model_name,
         embedding=vector,
         dimension=len(vector),
         inference_ms=inference_ms,
+        filename=filename,
+        diagnosis_label=diagnosis_label,
+        timestamp=timestamp,
     )
 
 
@@ -176,7 +191,7 @@ async def _run_embedding(
     },
 )
 async def embed(
-    request: InferenceRequest,
+    request: EmbedRequest,
     service: EmbeddingService = Depends(get_embedding_service),
     store: EmbeddingStore = Depends(get_embedding_store),
 ) -> EmbeddingResponse:
@@ -187,7 +202,9 @@ async def embed(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Image could not be decoded as base64.",
         )
-    return await _run_embedding(service, store, request.image)
+    return await _run_embedding(
+        service, store, request.image, request.filename, request.diagnosis_label
+    )
 
 
 @router.post(
@@ -200,6 +217,7 @@ async def embed(
 )
 async def embed_upload(
     file: UploadFile = File(...),
+    diagnosis_label: str | None = None,
     service: EmbeddingService = Depends(get_embedding_service),
     store: EmbeddingStore = Depends(get_embedding_store),
 ) -> EmbeddingResponse:
@@ -210,7 +228,13 @@ async def embed_upload(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded file is empty.",
         )
-    return await _run_embedding(service, store, b64encode(contents).decode())
+    return await _run_embedding(
+        service,
+        store,
+        b64encode(contents).decode(),
+        file.filename,
+        diagnosis_label,
+    )
 
 
 async def _run_search(
@@ -218,6 +242,7 @@ async def _run_search(
     store: EmbeddingStore,
     image_b64: str,
     top_k: int,
+    diagnosis_label: str | None = None,
 ) -> SearchResponse:
     """Embed a query image, search the store by cosine similarity, and report
     the top-k hits plus timing/memory measurements."""
@@ -236,12 +261,19 @@ async def _run_search(
 
     # 2. Similarity search latency (cosine is cheap CPU work; kept on the loop).
     t1 = loop.time()
-    hits = store.search(query_vec, top_k=top_k)
+    hits = store.search(query_vec, top_k=top_k, diagnosis_label=diagnosis_label)
     search_ms = round((loop.time() - t1) * 1000, 2)
 
     return SearchResponse(
         results=[
-            SearchHitResponse(embedding_id=h.embedding_id, score=h.score, model=h.model)
+            SearchHitResponse(
+                embedding_id=h.embedding_id,
+                score=h.score,
+                model=h.model,
+                filename=h.filename,
+                diagnosis_label=h.diagnosis_label,
+                timestamp=h.timestamp,
+            )
             for h in hits
         ],
         searched=store.count(),
@@ -260,7 +292,7 @@ async def _run_search(
     },
 )
 async def search(
-    request: InferenceRequest,
+    request: SearchRequest,
     service: EmbeddingService = Depends(get_embedding_service),
     store: EmbeddingStore = Depends(get_embedding_store),
 ) -> SearchResponse:
@@ -271,7 +303,9 @@ async def search(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Image could not be decoded as base64.",
         )
-    return await _run_search(service, store, request.image, top_k=5)
+    return await _run_search(
+        service, store, request.image, top_k=5, diagnosis_label=request.diagnosis_label
+    )
 
 
 @router.post(
@@ -284,6 +318,7 @@ async def search(
 )
 async def search_upload(
     file: UploadFile = File(...),
+    diagnosis_label: str | None = None,
     service: EmbeddingService = Depends(get_embedding_service),
     store: EmbeddingStore = Depends(get_embedding_store),
 ) -> SearchResponse:
@@ -293,4 +328,10 @@ async def search_upload(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded file is empty.",
         )
-    return await _run_search(service, store, b64encode(contents).decode(), top_k=5)
+    return await _run_search(
+        service,
+        store,
+        b64encode(contents).decode(),
+        top_k=5,
+        diagnosis_label=diagnosis_label,
+    )

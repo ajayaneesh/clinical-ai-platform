@@ -1,7 +1,7 @@
 from fastapi import Request
 
 from app.core.config import settings
-from app.core.embedding_store import EmbeddingStore
+from app.core.embedding_store import EmbeddingStore, InMemoryEmbeddingStore
 from app.core.queue import Queue
 from app.models.inference import InferenceModel
 from app.models.manager import ModelManager
@@ -77,6 +77,25 @@ def get_embedding_service(request: Request) -> EmbeddingService:
         )
     assert isinstance(service, EmbeddingService)
     return service
+
+
+def build_embedding_store() -> EmbeddingStore:
+    """Composition root for the embedding store: "memory" (default, ephemeral)
+    or "qdrant" (persistent, indexed). Lazy import so memory-only runs / tests
+    don't require qdrant-client to be reachable."""
+    if settings.vector_store == "memory":
+        return InMemoryEmbeddingStore()
+    if settings.vector_store == "qdrant":
+        from app.core.embedding_store import QdrantEmbeddingStore
+
+        return QdrantEmbeddingStore(
+            host=settings.qdrant_host,
+            port=settings.qdrant_port,
+            collection=settings.qdrant_collection,
+        )
+    raise ValueError(
+        f"unknown vector_store '{settings.vector_store}'; choose from ['memory', 'qdrant']"
+    )
 
 
 def get_embedding_store(request: Request) -> EmbeddingStore:
