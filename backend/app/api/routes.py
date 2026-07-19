@@ -143,7 +143,7 @@ async def _run_embedding(
     store: EmbeddingStore,
     image_b64: str,
     filename: str | None,
-    diagnosis_label: str | None,
+    label: str | None,
 ) -> EmbeddingResponse:
     """Embed a base64 image, store the vector + metadata, return id + timing.
 
@@ -167,7 +167,7 @@ async def _run_embedding(
         vector,
         service.model_name,
         filename=filename,
-        diagnosis_label=diagnosis_label,
+        label=label,
         timestamp=timestamp,
     )
     return EmbeddingResponse(
@@ -177,7 +177,7 @@ async def _run_embedding(
         dimension=len(vector),
         inference_ms=inference_ms,
         filename=filename,
-        diagnosis_label=diagnosis_label,
+        label=label,
         timestamp=timestamp,
     )
 
@@ -203,7 +203,7 @@ async def embed(
             detail="Image could not be decoded as base64.",
         )
     return await _run_embedding(
-        service, store, request.image, request.filename, request.diagnosis_label
+        service, store, request.image, request.filename, request.label
     )
 
 
@@ -217,7 +217,7 @@ async def embed(
 )
 async def embed_upload(
     file: UploadFile = File(...),
-    diagnosis_label: str | None = None,
+    label: str | None = None,
     service: EmbeddingService = Depends(get_embedding_service),
     store: EmbeddingStore = Depends(get_embedding_store),
 ) -> EmbeddingResponse:
@@ -233,7 +233,7 @@ async def embed_upload(
         store,
         b64encode(contents).decode(),
         file.filename,
-        diagnosis_label,
+        label,
     )
 
 
@@ -242,7 +242,7 @@ async def _run_search(
     store: EmbeddingStore,
     image_b64: str,
     top_k: int,
-    diagnosis_label: str | None = None,
+    label: str | None = None,
 ) -> SearchResponse:
     """Embed a query image, search the store by cosine similarity, and report
     the top-k hits plus timing/memory measurements."""
@@ -261,7 +261,7 @@ async def _run_search(
 
     # 2. Similarity search latency (cosine is cheap CPU work; kept on the loop).
     t1 = loop.time()
-    hits = store.search(query_vec, top_k=top_k, diagnosis_label=diagnosis_label)
+    hits = store.search(query_vec, top_k=top_k, label=label)
     search_ms = round((loop.time() - t1) * 1000, 2)
 
     return SearchResponse(
@@ -271,7 +271,7 @@ async def _run_search(
                 score=h.score,
                 model=h.model,
                 filename=h.filename,
-                diagnosis_label=h.diagnosis_label,
+                label=h.label,
                 timestamp=h.timestamp,
             )
             for h in hits
@@ -304,7 +304,7 @@ async def search(
             detail="Image could not be decoded as base64.",
         )
     return await _run_search(
-        service, store, request.image, top_k=5, diagnosis_label=request.diagnosis_label
+        service, store, request.image, top_k=5, label=request.label
     )
 
 
@@ -318,7 +318,7 @@ async def search(
 )
 async def search_upload(
     file: UploadFile = File(...),
-    diagnosis_label: str | None = None,
+    label: str | None = None,
     service: EmbeddingService = Depends(get_embedding_service),
     store: EmbeddingStore = Depends(get_embedding_store),
 ) -> SearchResponse:
@@ -333,5 +333,5 @@ async def search_upload(
         store,
         b64encode(contents).decode(),
         top_k=5,
-        diagnosis_label=diagnosis_label,
+        label=label,
     )

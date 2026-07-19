@@ -56,7 +56,7 @@ class EmbeddingResponse(BaseModel):
         description="Original filename stored alongside the vector, if provided.",
         examples=["patient_042_chest_xray.png"],
     )
-    diagnosis_label: str | None = Field(
+    label: str | None = Field(
         default=None,
         description="Diagnosis label stored alongside the vector, if provided.",
         examples=["pneumonia"],
@@ -76,7 +76,7 @@ class SearchHitResponse(BaseModel):
     )
     model: str = Field(examples=["biomedclip"])
     filename: str | None = Field(default=None, examples=["patient_042_chest_xray.png"])
-    diagnosis_label: str | None = Field(default=None, examples=["pneumonia"])
+    label: str | None = Field(default=None, examples=["pneumonia"])
     timestamp: str | None = Field(default=None, examples=["2026-07-15T10:32:00+00:00"])
 
 

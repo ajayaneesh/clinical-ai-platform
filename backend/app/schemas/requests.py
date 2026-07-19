@@ -20,7 +20,7 @@ class EmbedRequest(BaseModel):
         description="Original filename of the image, stored alongside the vector.",
         examples=["patient_042_chest_xray.png"],
     )
-    diagnosis_label: str | None = Field(
+    label: str | None = Field(
         default=None,
         description="Diagnosis label to attach to this embedding, if known.",
         examples=["pneumonia"],
@@ -33,7 +33,7 @@ class SearchRequest(BaseModel):
         description="Base64-encoded query image.",
         examples=["iVBORw0KGgoAAAANSUhEUgAAAAUA..."],
     )
-    diagnosis_label: str | None = Field(
+    label: str | None = Field(
         default=None,
         description="Restrict the search to stored embeddings with this label.",
         examples=["pneumonia"],

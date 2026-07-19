@@ -64,21 +64,21 @@ def test_add_stores_metadata():
         [0.1, 0.2],
         "m",
         filename="scan.png",
-        diagnosis_label="pneumonia",
+        label="pneumonia",
         timestamp="2026-07-15T00:00:00+00:00",
     )
     stored = store.get(eid)
     assert stored.filename == "scan.png"
-    assert stored.diagnosis_label == "pneumonia"
+    assert stored.label == "pneumonia"
     assert stored.timestamp == "2026-07-15T00:00:00+00:00"
 
 
-def test_search_filters_by_diagnosis_label():
+def test_search_filters_by_label():
     store = InMemoryEmbeddingStore()
-    id_match = store.add([1.0, 0.0], "m", diagnosis_label="pneumonia")
-    store.add([1.0, 0.0], "m", diagnosis_label="normal")
+    id_match = store.add([1.0, 0.0], "m", label="pneumonia")
+    store.add([1.0, 0.0], "m", label="normal")
 
-    hits = store.search([1.0, 0.0], top_k=5, diagnosis_label="pneumonia")
+    hits = store.search([1.0, 0.0], top_k=5, label="pneumonia")
     assert [h.embedding_id for h in hits] == [id_match]
 
 
@@ -94,7 +94,7 @@ def test_qdrant_add_and_get_roundtrips():
         [0.1, 0.2, 0.3],
         "biomedclip",
         filename="scan.png",
-        diagnosis_label="pneumonia",
+        label="pneumonia",
         timestamp="2026-07-15T00:00:00+00:00",
     )
     stored = store.get(eid)
@@ -102,7 +102,7 @@ def test_qdrant_add_and_get_roundtrips():
     assert stored.model == "biomedclip"
     assert stored.dimension == 3
     assert stored.filename == "scan.png"
-    assert stored.diagnosis_label == "pneumonia"
+    assert stored.label == "pneumonia"
     assert stored.timestamp == "2026-07-15T00:00:00+00:00"
     assert stored.embedding_id == eid
 
@@ -135,12 +135,12 @@ def test_qdrant_search_ranks_by_similarity():
     assert hits[0].score > hits[1].score > hits[2].score
 
 
-def test_qdrant_search_filters_by_diagnosis_label():
+def test_qdrant_search_filters_by_label():
     store = QdrantEmbeddingStore.in_memory()
-    id_match = store.add([1.0, 0.0], "m", diagnosis_label="pneumonia")
-    store.add([1.0, 0.0], "m", diagnosis_label="normal")
+    id_match = store.add([1.0, 0.0], "m", label="pneumonia")
+    store.add([1.0, 0.0], "m", label="normal")
 
-    hits = store.search([1.0, 0.0], top_k=5, diagnosis_label="pneumonia")
+    hits = store.search([1.0, 0.0], top_k=5, label="pneumonia")
     assert [h.embedding_id for h in hits] == [id_match]
 
 

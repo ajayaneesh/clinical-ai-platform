@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     # Which embedding store backs /embed and /search: "memory" (default, no
     # setup, lost on restart) or "qdrant" (persistent, indexed at scale).
-    vector_store: str = "memory"
+    vector_store: str = "qdrant"
 
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333

@@ -24,7 +24,7 @@ class StoredEmbedding:
     model: str
     dimension: int
     filename: str | None = None
-    diagnosis_label: str | None = None
+    label: str | None = None
     timestamp: str | None = None
     embedding_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
@@ -35,7 +35,7 @@ class SearchHit:
     score: float
     model: str
     filename: str | None = None
-    diagnosis_label: str | None = None
+    label: str | None = None
     timestamp: str | None = None
 
 
@@ -45,7 +45,7 @@ class EmbeddingStore(Protocol):
         vector: Embedding,
         model: str,
         filename: str | None = None,
-        diagnosis_label: str | None = None,
+        label: str | None = None,
         timestamp: str | None = None,
     ) -> str: ...
 
@@ -61,7 +61,7 @@ class EmbeddingStore(Protocol):
         self,
         query: Embedding,
         top_k: int,
-        diagnosis_label: str | None = None,
+        label: str | None = None,
     ) -> list[SearchHit]: ...
 
 
@@ -74,7 +74,7 @@ class InMemoryEmbeddingStore(EmbeddingStore):
         vector: Embedding,
         model: str,
         filename: str | None = None,
-        diagnosis_label: str | None = None,
+        label: str | None = None,
         timestamp: str | None = None,
     ) -> str:
         item = StoredEmbedding(
@@ -82,7 +82,7 @@ class InMemoryEmbeddingStore(EmbeddingStore):
             model=model,
             dimension=len(vector),
             filename=filename,
-            diagnosis_label=diagnosis_label,
+            label=label,
             timestamp=timestamp,
         )
         self._items[item.embedding_id] = item
@@ -105,22 +105,20 @@ class InMemoryEmbeddingStore(EmbeddingStore):
         self,
         query: Embedding,
         top_k: int,
-        diagnosis_label: str | None = None,
+        label: str | None = None,
     ) -> list[SearchHit]:
         # Brute-force: cosine against every stored vector, then take the top_k.
         # O(n) — fine for an in-memory demo; Qdrant does this indexed at scale.
         candidates: list[StoredEmbedding] = list(self._items.values())
-        if diagnosis_label is not None:
-            candidates = [
-                item for item in candidates if item.diagnosis_label == diagnosis_label
-            ]
+        if label is not None:
+            candidates = [item for item in candidates if item.label == label]
         hits = [
             SearchHit(
                 item.embedding_id,
                 cosine_similarity(query, item.vector),
                 item.model,
                 filename=item.filename,
-                diagnosis_label=item.diagnosis_label,
+                label=item.label,
                 timestamp=item.timestamp,
             )
             for item in candidates
@@ -132,11 +130,10 @@ class InMemoryEmbeddingStore(EmbeddingStore):
 class QdrantEmbeddingStore:
     """Persistent, indexed embedding store backed by Qdrant.
 
-    Same collection holds vector + payload (filename, diagnosis_label,
-    timestamp) per point, so metadata search/filtering is a single round trip.
-    The collection is created lazily on the first add(), sized to that
-    vector's dimension — every embedding model used against one collection
-    must share a dimension.
+    Same collection holds vector + payload (filename, label, timestamp) per
+    point, so metadata search/filtering is a single round trip. The collection
+    is created lazily on the first add(), sized to that vector's dimension —
+    every embedding model used against one collection must share a dimension.
     """
 
     def __init__(self, host: str, port: int, collection: str) -> None:
@@ -156,7 +153,7 @@ class QdrantEmbeddingStore:
         return store
 
     def _ensure_collection(self, dimension: int) -> None:
-        from qdrant_client.models import Distance, VectorParams
+        from qdrant_client.models import Distance, PayloadSchemaType, VectorParams
 
         if self._client.collection_exists(self._collection):
             return
@@ -164,13 +161,19 @@ class QdrantEmbeddingStore:
             collection_name=self._collection,
             vectors_config=VectorParams(size=dimension, distance=Distance.COSINE),
         )
+        # Indexed lookup instead of a linear payload scan when filtering by label.
+        self._client.create_payload_index(
+            collection_name=self._collection,
+            field_name="label",
+            field_schema=PayloadSchemaType.KEYWORD,
+        )
 
     def add(
         self,
         vector: Embedding,
         model: str,
         filename: str | None = None,
-        diagnosis_label: str | None = None,
+        label: str | None = None,
         timestamp: str | None = None,
     ) -> str:
         from qdrant_client.models import PointStruct
@@ -190,7 +193,7 @@ class QdrantEmbeddingStore:
                         "model": model,
                         "dimension": len(vector),
                         "filename": filename,
-                        "diagnosis_label": diagnosis_label,
+                        "label": label,
                         "timestamp": timestamp,
                     },
                 )
@@ -245,20 +248,16 @@ class QdrantEmbeddingStore:
         self,
         query: Embedding,
         top_k: int,
-        diagnosis_label: str | None = None,
+        label: str | None = None,
     ) -> list[SearchHit]:
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         if not self._client.collection_exists(self._collection):
             return []
         query_filter = None
-        if diagnosis_label is not None:
+        if label is not None:
             query_filter = Filter(
-                must=[
-                    FieldCondition(
-                        key="diagnosis_label", match=MatchValue(value=diagnosis_label)
-                    )
-                ]
+                must=[FieldCondition(key="label", match=MatchValue(value=label))]
             )
         results = self._client.query_points(
             collection_name=self._collection,
@@ -272,7 +271,7 @@ class QdrantEmbeddingStore:
                 score=point.score,
                 model=(point.payload or {}).get("model", ""),
                 filename=(point.payload or {}).get("filename"),
-                diagnosis_label=(point.payload or {}).get("diagnosis_label"),
+                label=(point.payload or {}).get("label"),
                 timestamp=(point.payload or {}).get("timestamp"),
             )
             for point in results
@@ -289,7 +288,7 @@ def _stored_embedding_from_point(point: Record) -> StoredEmbedding:
         model=payload.get("model", ""),
         dimension=payload.get("dimension", len(vector)),
         filename=payload.get("filename"),
-        diagnosis_label=payload.get("diagnosis_label"),
+        label=payload.get("label"),
         timestamp=payload.get("timestamp"),
         embedding_id=str(point.id),
     )
