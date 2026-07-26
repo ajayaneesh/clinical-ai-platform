@@ -62,5 +62,5 @@ testpaths = ["tests"]
 # Some ML libraries ship no type stubs; ignore missing imports for those only,
 # so our own code stays strictly type-checked.
 [[tool.mypy.overrides]]
-module = ["torchvision.*", "transformers.*", "psutil", "open_clip"]
+module = ["torchvision.*", "transformers.*", "psutil", "open_clip", "rank_bm25"]
 ignore_missing_imports = true
